@@ -3,6 +3,49 @@ import fs from "fs";
 import http from "http";
 import { Octokit, App } from "octokit";
 import { createNodeMiddleware } from "@octokit/webhooks";
+import { getErrorInfo } from "@pretendonetwork/error-codes";
+
+function getErrorCode(supportCode) {
+  const [moduleId, descriptionId] = supportCode.split("-");
+
+  const mod = getErrorInfo(moduleId, descriptionId, "en_US");
+
+  // TODO: cleanup and formatting
+  return (
+    "Error code detected: " +
+    moduleId +
+    "-" +
+    descriptionId +
+    "\n" +
+    "System: " +
+    (mod.module.system || "Unknown") +
+    "\n\n" +
+    "Module: " +
+    (mod.module.name || "Unknown") +
+    "(" +
+    (mod.module.description || "Unknown") +
+    ")\n" +
+    "Error: " +
+    (mod.name || "Unknown") +
+    "\n" +
+    "Message: " +
+    (mod.message || "Unknown") +
+    "\n" +
+    "Description: " +
+    (mod.short_description || "Unknown") +
+    "\n" +
+    "Long Description: " +
+    (mod.long_description || "Unknown") +
+    "\n\n" +
+    "Short-term solution: " +
+    (mod.short_solution || "Unknown") +
+    "\n" +
+    "Long-term solution: " +
+    (mod.long_solution || "Unknown") +
+    "\n\nSupport Link: " +
+    (mod.support_link || "Unknown")
+  );
+}
 
 // Load environment variables from .env file
 dotenv.config();
@@ -14,6 +57,10 @@ const privateKey = fs.readFileSync(privateKeyPath, "utf8");
 const secret = process.env.WEBHOOK_SECRET;
 const enterpriseHostname = process.env.ENTERPRISE_HOSTNAME;
 const messageForNewPRs = fs.readFileSync("./message.md", "utf8");
+
+// taken from https://github.com/PretendoNetwork/Bandwidth/blob/master/src/utils/errorCode.js
+// then thrown into chatgpt for a generic regex
+const ANY_SUPPORT_CODE_REGEX = /\b\d{3}-\d{4}\b/gm;
 
 // Create an authenticated Octokit client authenticated as a GitHub App
 const app = new App({
@@ -40,13 +87,15 @@ app.webhooks.on("pull_request.opened", async ({ octokit, payload }) => {
   console.log(
     `Received a pull request event for #${payload.pull_request.number}`,
   );
-  if (payload.pull_request.body.indexOf("101-0502") != -1) {
+  if (ANY_SUPPORT_CODE_REGEX.test(payload.pull_request.body)) {
     try {
       await octokit.rest.issues.createComment({
         owner: payload.repository.owner.login,
         repo: payload.repository.name,
         issue_number: payload.pull_request.number,
-        body: messageForNewPRs,
+        body: getErrorCode(
+          payload.pull_request.body.match(ANY_SUPPORT_CODE_REGEX)[0],
+        ),
       });
     } catch (error) {
       if (error.response) {
